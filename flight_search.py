@@ -1,7 +1,6 @@
 import os
 import json
 import time
-import threading
 import pandas as pd
 
 
@@ -17,6 +16,14 @@ def find_optimal_combination(data):
     no_show = [i for i in no_show_generator(df_fares, itinerary)]
     df_fares.drop(no_show, inplace=True)
 
+    # Put weights on fares and sort them
+    df_fares['weight'] = [len(fare[1].routes) / fare[1].price for fare in df_fares.iterrows()]
+    df_fares.sort_values(by=['weight'], inplace=True)
+
+    # Drop duplicate fares with higher weight
+    df_fares["t_routes"] = df_fares.routes.apply(lambda x: tuple(json.dumps(x)))
+    df_fares.drop_duplicates(subset='t_routes', keep='first')
+
     start = time.time()
     # Find variations
     variations = get_variations(df_fares, itinerary)
@@ -27,7 +34,7 @@ def find_optimal_combination(data):
     # Get cheapest variation
     profitable = min(variations, key=lambda x: x['price'])
 
-    return profitable['index']
+    return profitable['indexes']
 
 
 def no_show_generator(df, itinerary):
@@ -37,52 +44,30 @@ def no_show_generator(df, itinerary):
             yield i
 
 
-def route_generator(routes):
-    for route in routes:
-        yield route
-
-
-def satisfactory_generator(left_fares, route):
-    for index, fare in left_fares.iterrows():
-        if route in fare['routes']:
-            yield {
-                'price': fare['price'],
-                'routes': fare['routes'],
-                'index': index
-            }
-
-
 def get_variations(df, itinerary):
-    routes = route_generator(itinerary.copy())
     left_fares = df.copy()
     variations = []
 
-    def fare_thread(t_fare, t_route):
-        for variation in variations:
-            if t_route not in variation['routes']:
-                variation['price'] += t_fare['price']
-                variation['routes'] += t_fare['routes']
-                if type(variation['index']) == list:
-                    variation['index'].append(t_fare['index'])
-                else:
-                    variation['index'] = [variation['index'], t_fare['index']]
-
-    for route in routes:
-        satisfactory = satisfactory_generator(left_fares, route)
-        threads = []
+    for route in itinerary:
+        satisfactory = left_fares[[route in fare for fare in left_fares.routes]]
+        left_fares.drop(satisfactory.index, inplace=True)
 
         if not variations:
-            variations.extend(satisfactory)
+            variations.extend(
+                [{
+                    'indexes': [fare[0]],
+                    'routes': fare[1].routes,
+                    'price': fare[1].price
+                } for fare in satisfactory.iterrows()]
+            )
             continue
 
-        for fare in satisfactory:
-            x = threading.Thread(target=fare_thread, args=(fare, route,))
-            threads.append(x)
-            x.start()
-            left_fares.drop(fare['index'], inplace=True)
-
-        for index, thread in enumerate(threads):
-            thread.join()
+        i_s = [i for i, variation in enumerate(variations) if route not in variation['routes']]
+        fill = satisfactory.iloc[0]
+        for i in i_s:
+            variations[i]['indexes'].append(satisfactory.first_valid_index())
+            variations[i]['routes'].extend(fill.routes)
+            variations[i]['price'] += fill.price
 
     return variations
 
