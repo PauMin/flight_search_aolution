@@ -26,15 +26,12 @@ def find_optimal_combination(data):
 
     start = time.time()
     # Find variations
-    variations = get_variations(df_fares, itinerary)
+    best = get_best(df_fares, itinerary)
     finish = time.time()
 
     print(finish - start)
 
-    # Get cheapest variation
-    profitable = min(variations, key=lambda x: x['price'])
-
-    return profitable['indexes']
+    return best
 
 
 def no_show_generator(df, itinerary):
@@ -44,32 +41,41 @@ def no_show_generator(df, itinerary):
             yield i
 
 
-def get_variations(df, itinerary):
-    left_fares = df.copy()
+def get_best(df, itinerary):
     variations = []
+    best = {}
+    found = False
+    route = itinerary[0]
+    satisfactory = df[[route in fare for fare in df.routes]]
+    df.drop(satisfactory.index, inplace=True)
+    variations.extend(
+        [{
+            'indexes': [fare[0]],
+            'routes': fare[1].routes,
+            'price': fare[1].price,
+            'weight': fare[1].weight
+        } for fare in satisfactory.iterrows()]
+    )
 
-    for route in itinerary:
-        satisfactory = left_fares[[route in fare for fare in left_fares.routes]]
-        left_fares.drop(satisfactory.index, inplace=True)
+    while not found:
+        route = [route for route in itinerary if route not in variations[0]['routes']][0]
+        satisfactory = df[[route in fare for fare in df.routes]]
+        df.drop(satisfactory.index, inplace=True)
+        fill = satisfactory.iloc[0]
 
-        if not variations:
-            variations.extend(
-                [{
-                    'indexes': [fare[0]],
-                    'routes': fare[1].routes,
-                    'price': fare[1].price
-                } for fare in satisfactory.iterrows()]
-            )
+        variations[0]['indexes'].append(satisfactory.first_valid_index())
+        variations[0]['routes'].extend(fill.routes)
+        variations[0]['price'] += fill.price
+        variations[0]['weight'] = len(fill.routes) / fill.price
+
+        best = variations[0]
+        variations = sorted(variations, key=lambda i: i['weight'])
+
+        if best['indexes'] == variations[0]['indexes'] and best['routes']:
+            found = True
             continue
 
-        i_s = [i for i, variation in enumerate(variations) if route not in variation['routes']]
-        fill = satisfactory.iloc[0]
-        for i in i_s:
-            variations[i]['indexes'].append(satisfactory.first_valid_index())
-            variations[i]['routes'].extend(fill.routes)
-            variations[i]['price'] += fill.price
-
-    return variations
+    return best['indexes']
 
 
 def main():
