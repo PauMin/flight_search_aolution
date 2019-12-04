@@ -1,6 +1,5 @@
 import os
 import json
-import time
 import ijson
 
 
@@ -54,11 +53,7 @@ def main():
 
         f.seek(0, 0)
 
-        start = time.time()
         answer = get_best(f, routes)
-        finish = time.time()
-
-    print(finish - start)
 
     with open(os.environ["RESULT_FILE"], 'w') as f:
         f.write(json.dumps(answer))
